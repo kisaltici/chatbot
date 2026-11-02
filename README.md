@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# zuulab asistan — WhatsApp botu
 
-## Getting Started
+Firmanızı tanıyan, WhatsApp üzerinden çalışan asistan. Önce **hazır cevaplara** bakar (anında, ücretsiz), bulamazsa **AI**'ye firma bilginizle sorar.
 
-First, run the development server:
+## Nasıl çalışır
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+Müşteri WhatsApp mesajı
+  → Meta Cloud API → /api/webhooks/whatsapp (imza doğrulanır, izinli numara kontrolü)
+  → Karar motoru (src/lib/engine.ts)
+      1. Menü / buton seçimi      → ilgili içerik
+      2. Komutlar (#ai, #sifirla)
+      3. Selam, teşekkür, "yetkili" gibi kalıplar
+      4. Hazır cevap eşleşmesi ≥ %55 → AI çağrılmaz
+      5. AI — NVIDIA (firma bilgisi + hazır cevaplar + son 12 mesaj)
+      6. AI yoksa → "Bunu mu demek istediniz?" butonları
+  → WhatsApp liste menüsü / butonlu cevap
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Özellikler
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- WhatsApp liste menüsü (kategoriler) ve butonlu cevaplar (ilgili sorular)
+- Türkçe'ye duyarlı eşleştirme: ek toleransı (randevumu ≈ randevu), yazım hatası toleransı, Türkçe karakter sadeleştirme
+- Çalışma saati farkındalığı (mesai dışında "Yarın 09:00'da döneceğiz")
+- "Yetkiliye bağlan" → firma sahibine WhatsApp bildirimi (`OWNER_NUMBER`)
+- Sohbet hafızası (AI önceki mesajları hatırlar), `#sifirla` ile temizlenir
+- `#ai soru` → hazır cevapları atlayıp AI'ye sor
+- İzinli numara listesi (`ALLOWED_NUMBERS`) — sadece sizin numaranız yazabilsin
+- Şifreli web paneli: WhatsApp simülatörü + her cevabın karar izi, hazır cevap test aracı, firma bilgisi, kurulum sihirbazı
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Düzenlenecek dosyalar
 
-## Learn More
+| Dosya | İçerik |
+|---|---|
+| `src/data/company.ts` | Firma adı, hizmetler, fiyatlar, saatler, iletişim, ton, yasaklar |
+| Panel → Hazır cevaplar | Soruları ekle, düzenle, sil (Redis'te saklanır; ilk içerik `src/data/faq.ts`) |
 
-To learn more about Next.js, take a look at the following resources:
+## Lokal geliştirme
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm install
+cp .env.example .env.local   # NVIDIA_API_KEY ekleyin
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Lokalde `ADMIN_PASSWORD` yoksa panel şifresiz açılır. WhatsApp webhook'u lokalde çalışmaz (Meta localhost'a ulaşamaz); simülatörü kullanın.
 
-## Deploy on Vercel
+## Vercel'e yükleme
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Projeyi GitHub'a gönderin, Vercel'de **Add New → Project** ile içe aktarın.
+2. **Settings → Environment Variables** altına `.env.example`'daki değerleri girin (en az `ADMIN_PASSWORD` ve dört `WHATSAPP_*`).
+3. `NVIDIA_API_KEY` değerini de ekleyin (AI bununla çalışır). İsterseniz `AI_MODEL` ile modeli değiştirin.
+4. Deploy sonrası panelde **WhatsApp bağlantısı** sayfasındaki webhook adresini Meta'ya girin.
+5. (Önerilir) Kalıcı hafıza için: `vercel integration add upstash/upstash-kv` → `REDIS_URL` otomatik gelir.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+> Meta'nın geçici token'ı 24 saatte biter. Kalıcı çalışma için Meta Business Suite'te **System User** oluşturup kalıcı token alın.
