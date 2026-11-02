@@ -7,7 +7,10 @@ import { ease } from "@/components/motion-provider";
 
 type Check = { ok: boolean; detail: string; phone?: string };
 type Event = { at: string; kind: "in" | "out" | "error" | "info"; text: string };
-type Diag = { whatsapp: Check; redis: Check; events: Event[]; checkedAt: string };
+type Diag = { whatsapp: Check; redis: Check; events: Event[]; subscription: (Check & { apps: string[] }) | null; waba: string; checkedAt: string };
+
+/** Meta'da test numarasının bağlı olduğu WhatsApp hesabı (WhatsApp → API Setup'ta "Messaging account ID") */
+const DEFAULT_WABA = "1958880235479651";
 
 const DOT: Record<Event["kind"], string> = { in: "bg-ai-dot", out: "bg-faq-dot", error: "bg-danger-dot", info: "bg-warn-dot" };
 const LABEL: Record<Event["kind"], string> = { in: "gelen", out: "giden", error: "hata", info: "bilgi" };
@@ -20,12 +23,15 @@ export function Diagnostics() {
   const [data, setData] = useState<Diag | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [waba, setWaba] = useState(DEFAULT_WABA);
+  const [subscribing, setSubscribing] = useState(false);
+  const [subscribeMsg, setSubscribeMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/diagnostics", { cache: "no-store" });
+      const res = await fetch(`/api/diagnostics?waba=${encodeURIComponent(waba)}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       setData(await res.json());
     } catch {
@@ -33,12 +39,22 @@ export function Diagnostics() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [waba]);
+
+  async function subscribe() {
+    setSubscribing(true);
+    setSubscribeMsg(null);
+    const res = await fetch("/api/diagnostics", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ waba }) }).catch(() => null);
+    const data = (await res?.json().catch(() => null)) as { ok?: boolean; detail?: string } | null;
+    setSubscribing(false);
+    setSubscribeMsg(data?.ok ? "Abone edildi. Şimdi telefondan tekrar yazıp yenile'ye basın." : `Abone edilemedi: ${data?.detail ?? "bağlantı hatası"}`);
+    void load();
+  }
 
   // İlk açılışta bir kez kontrol et (durum yalnızca istek bitince güncellenir)
   useEffect(() => {
     let alive = true;
-    fetch("/api/diagnostics", { cache: "no-store" })
+    fetch(`/api/diagnostics?waba=${DEFAULT_WABA}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: Diag) => alive && setData(d))
       .catch(() => alive && setError("Kontrol yapılamadı. Sayfayı yenileyip tekrar deneyin."));
@@ -72,6 +88,41 @@ export function Diagnostics() {
       <div className="mt-6 grid gap-3 sm:grid-cols-2">
         <CheckRow title="Meta erişim anahtarı" check={data?.whatsapp} extra={data?.whatsapp.phone ? `Numara: ${data.whatsapp.phone}` : undefined} />
         <CheckRow title="Redis (kalıcı depo)" check={data?.redis} />
+      </div>
+
+      <div className="mt-3 rounded-2xl bg-surface-2 px-4 py-3.5">
+        <div className="flex items-center gap-2 text-[14px]">
+          <span
+            className={`size-2 rounded-full ${!data?.subscription ? "bg-line-strong" : data.subscription.ok ? "bg-faq-dot" : "bg-danger-dot"}`}
+            aria-hidden
+          />
+          <span className="text-ink">WhatsApp hesabı → uygulama aboneliği</span>
+          <span className="ml-auto text-[13px] text-muted">{!data?.subscription ? "…" : data.subscription.ok ? "abone" : "abone değil"}</span>
+        </div>
+        {data?.subscription && (
+          <p className={`mt-1.5 break-words text-[13px] leading-snug ${data.subscription.ok ? "text-muted" : "text-danger"}`}>{data.subscription.detail}</p>
+        )}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <label htmlFor="waba" className="text-[13px] text-muted">
+            WhatsApp hesap ID
+          </label>
+          <input
+            id="waba"
+            value={waba}
+            onChange={(e) => setWaba(e.target.value.replace(/D/g, ""))}
+            inputMode="numeric"
+            className="h-9 w-48 rounded-xl bg-surface px-3 text-[13.5px] tabular-nums outline-none ring-1 ring-line"
+          />
+          <motion.button
+            whileTap={{ scale: 0.96 }}
+            onClick={subscribe}
+            disabled={subscribing || !waba}
+            className="h-9 rounded-full bg-ink px-4 text-[13.5px] font-medium text-bg disabled:opacity-50"
+          >
+            {subscribing ? "Abone ediliyor…" : "Uygulamaya abone et"}
+          </motion.button>
+        </div>
+        {subscribeMsg && <p className="mt-2 text-[13px] text-ink-2">{subscribeMsg}</p>}
       </div>
 
       <h3 className="mt-8 text-[14px] text-muted">son WhatsApp olayları</h3>

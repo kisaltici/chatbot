@@ -95,3 +95,50 @@ export async function whatsappCheck(): Promise<{ ok: boolean; detail: string; ph
     return { ok: false, detail: err instanceof Error ? err.message : String(err) };
   }
 }
+
+/**
+ * WhatsApp hesabı (WABA) bu uygulamaya abone mi? Abone değilse Meta gelen mesajları webhook'a HİÇ göndermez
+ * (anahtar çalışır ama siteye olay gelmez). WABA kimliği: WHATSAPP_BUSINESS_ACCOUNT_ID ya da panelden girilen değer.
+ */
+export async function wabaSubscription(wabaId: string): Promise<{ ok: boolean; detail: string; apps: string[] }> {
+  const token = process.env.WHATSAPP_ACCESS_TOKEN;
+  if (!token) return { ok: false, detail: "WHATSAPP_ACCESS_TOKEN eksik", apps: [] };
+  if (!/^\d{5,25}$/.test(wabaId)) return { ok: false, detail: "WhatsApp hesap kimliği (WABA ID) girilmedi", apps: [] };
+  try {
+    const res = await fetch(`https://graph.facebook.com/v25.0/${wabaId}/subscribed_apps`, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: { whatsapp_business_api_data?: { id?: string; name?: string } }[];
+      error?: { message?: string };
+    };
+    if (!res.ok) return { ok: false, detail: data.error?.message ?? `HTTP ${res.status}`, apps: [] };
+    const apps = (data.data ?? []).map((d) => d.whatsapp_business_api_data?.name ?? d.whatsapp_business_api_data?.id ?? "?");
+    return apps.length
+      ? { ok: true, detail: `Abone uygulamalar: ${apps.join(", ")}`, apps }
+      : { ok: false, detail: "Bu WhatsApp hesabına abone uygulama yok — Meta mesajları webhook'a göndermiyor. Aşağıdaki butonla abone edin.", apps };
+  } catch (err) {
+    return { ok: false, detail: err instanceof Error ? err.message : String(err), apps: [] };
+  }
+}
+
+/** WABA'yı bu uygulamaya abone eder (token'ın ait olduğu uygulama) */
+export async function subscribeWaba(wabaId: string): Promise<{ ok: boolean; detail: string }> {
+  const token = process.env.WHATSAPP_ACCESS_TOKEN;
+  if (!token) return { ok: false, detail: "WHATSAPP_ACCESS_TOKEN eksik" };
+  if (!/^\d{5,25}$/.test(wabaId)) return { ok: false, detail: "Geçersiz WABA ID" };
+  try {
+    const res = await fetch(`https://graph.facebook.com/v25.0/${wabaId}/subscribed_apps`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { message?: string } };
+    if (!res.ok || !data.success) return { ok: false, detail: data.error?.message ?? `HTTP ${res.status}` };
+    await diag("info", "WhatsApp hesabı uygulamaya abone edildi; gelen mesajlar artık webhook'a iletilecek");
+    return { ok: true, detail: "Abone edildi" };
+  } catch (err) {
+    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+  }
+}
