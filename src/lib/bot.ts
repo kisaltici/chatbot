@@ -6,6 +6,7 @@ import { createRedisState } from "@chat-adapter/state-redis";
 import type { ChatTurn } from "@/lib/ai";
 import { respond, replyToText, type Awaiting, type BotReply, type Incoming } from "@/lib/engine";
 import { normalizePhone } from "@/lib/phone";
+import { diag, maskPhone as mask } from "@/lib/diag";
 import { bridgeConfigured, sendInboundToSite, type InboundAction } from "@/lib/bridge";
 import { detectOrderIntent } from "@/lib/order-intents";
 import { REPLIES, codPayload, parseCodPayload, templateByEvent, type TemplateEvent } from "@/data/templates";
@@ -56,6 +57,7 @@ export function getBot(): Chat {
     if (intent && (await handleOrderIntent(thread as Thread<ThreadState>, userId, intent, undefined, message.text ?? ""))) return;
     if (!isAllowed(userId)) {
       console.warn(`[bot] izinsiz numara yok sayıldı: ${maskPhone(userId)}`);
+      await diag("info", `İzin listesinde olmayan numara yok sayıldı: ${mask(userId)} (ALLOWED_NUMBERS)`);
       return;
     }
     await handle(thread as Thread<ThreadState>, { kind: "text", text: message.text ?? "" }, userId);
@@ -79,6 +81,16 @@ export function getBot(): Chat {
 }
 
 async function handle(thread: Thread<ThreadState>, input: Incoming, userId: string) {
+  try {
+    await handleInner(thread, input, userId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await diag("error", `Cevap gönderilemedi (${mask(userId)}): ${msg}`);
+    throw err;
+  }
+}
+
+async function handleInner(thread: Thread<ThreadState>, input: Incoming, userId: string) {
   const adapter = getBot().getAdapter("whatsapp") as WhatsAppAdapter;
 
   await thread.markAsRead().catch(() => {});
@@ -100,6 +112,7 @@ async function handle(thread: Thread<ThreadState>, input: Incoming, userId: stri
   if (reply.handoff) await notifyOwner(userId, userText, history).catch((e) => console.error("[bot] yetkili bildirimi gönderilemedi", e));
 
   console.info(`[bot] ${reply.trace.route} ${reply.trace.matchedId ?? ""} ${reply.trace.ms}ms`);
+  await diag("out", `Cevap gönderildi → ${mask(userId)} (${reply.trace.route}${reply.trace.matchedId ? `: ${reply.trace.matchedId}` : ""})`);
 }
 
 type Interactive = Record<string, unknown>;
