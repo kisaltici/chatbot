@@ -44,3 +44,6 @@ next-env.d.ts
 
 # panelden düzenlenen bilgi bankası (lokal geliştirme)
 /.data/
+
+.vercel
+.env*
